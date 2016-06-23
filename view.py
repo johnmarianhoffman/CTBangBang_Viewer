@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import sys
 import time
 
@@ -5,7 +7,34 @@ import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui
 import pyqtgraph as pg
 
-import fct_stack as fs
+from argparse import ArgumentParser
+
+class image_stack:
+    stack=None
+    curr_image=0
+    n_images=None
+    width=512
+    height=512
+
+    def __init__(self,filepath,width,height):
+
+        self.stack=np.fromfile(filepath,'float32');
+        self.stack=self.stack.reshape(self.stack.size/(self.width*self.height),self.width,self.height);
+        self.stack=1000*(self.stack-0.01923)/(0.01923)
+        stack_size=self.stack.shape
+        self.n_images=stack_size[0];
+
+    def __getitem__(self,key):
+        if (key in range(0,self.n_images)):
+            return self.stack[key,:,:]
+        else:
+            raise IndexError
+
+    def next_image(self):
+        self.curr_image=min(self.curr_image+1,self.n_images-1);
+
+    def prev_image(self):
+        self.curr_image=max(self.curr_image-1,0);
 
 class viewer(pg.GraphicsLayoutWidget):
     #objects
@@ -21,10 +50,10 @@ class viewer(pg.GraphicsLayoutWidget):
     is_windowing=False;
     is_playing=False;
     
-    def __init__(self,app,filepath):
+    def __init__(self,app,filepath,width,height):
         super(viewer,self).__init__()
         self.app=app
-        self.stack=fs.image_stack(sys.argv[1]);
+        self.stack=image_stack(filepath,width,height);
         self.initUI()
 
     def initUI(self):
@@ -95,10 +124,23 @@ class viewer(pg.GraphicsLayoutWidget):
 
 def main():
     app=QtGui.QApplication(sys.argv)
-    if len(sys.argv)==2:
-        v=viewer(app,sys.argv[1])
-    else:
-        v=viewer(app,sys.argv[1],sys.argv[2],sys.argv[3]);
+
+    parser = ArgumentParser(description="")
+    parser.add_argument('filepath', help='Path to float binary to be read');
+    parser.add_argument('width' , nargs='?', default=512,  help='Width of the image stack being read');  #required=False,
+    parser.add_argument('height', nargs='?', default=512,  help='Height of the image stack being read'); #required=False,
+    args=parser.parse_args()
+
+    filepath=args.filepath;
+    width=args.width;
+    height=args.height;
+
+    v=viewer(app,filepath,width,height)
+
+    #if len(sys.argv)==2:
+    #    v=viewer(app,filepath,width,height)
+    #else:
+    #    v=viewer(app,sys.argv[1],sys.argv[2],sys.argv[3]);
     sys.exit(app.exec_())
 
 if __name__=="__main__":
