@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+import os
 import sys
 import time
 
@@ -15,10 +15,28 @@ class image_stack:
     n_images=None
     width=512
     height=512
+    datatype='float'
 
-    def __init__(self,filepath,width,height):
+    def __init__(self,filepath,width,height,offset,datatype):
+        print('offset: ' + str(offset));
+        print('width: ' +  str(width ));
+        print('height: ' + str(height));
 
-        self.stack=np.fromfile(filepath,'float32');
+        self.width=width;
+        self.height=height;
+        self.datatype=datatype
+
+        with open(filepath,'r') as f:
+
+            f.seek(offset,os.SEEK_SET);
+            if self.datatype=='float':
+                self.stack=np.fromfile(f,'float32')
+            else:
+                self.stack=np.fromfile(f,'float64')
+            
+            print(self.stack.size)
+        
+        #self.stack=np.fromfile(filepath,'float32');
         self.stack=self.stack.reshape(self.stack.size/(self.width*self.height),self.width,self.height);
         self.stack=1000*(self.stack-0.01923)/(0.01923)
         stack_size=self.stack.shape
@@ -50,10 +68,10 @@ class viewer(pg.GraphicsLayoutWidget):
     is_windowing=False;
     is_playing=False;
     
-    def __init__(self,app,filepath,width,height):
+    def __init__(self,app,stack):
         super(viewer,self).__init__()
         self.app=app
-        self.stack=image_stack(filepath,width,height);
+        self.stack=stack;
         self.initUI()
 
     def initUI(self):
@@ -129,13 +147,17 @@ def main():
     parser.add_argument('filepath', help='Path to float binary to be read');
     parser.add_argument('width' , nargs='?', default=512,  help='Width of the image stack being read');  #required=False,
     parser.add_argument('height', nargs='?', default=512,  help='Height of the image stack being read'); #required=False,
+    parser.add_argument('datatype', nargs='?', default='float',  help='Height of the image stack being read'); #required=False,
+    parser.add_argument('offset', nargs='?', default=0,  help='Height of the image stack being read'); #required=False,
     args=parser.parse_args()
 
     filepath=args.filepath;
-    width=args.width;
-    height=args.height;
-
-    v=viewer(app,filepath,width,height)
+    width= int(args.width);
+    height=int(args.height);
+    datatype=args.datatype;
+    offset=int(args.offset);
+    
+    v=viewer(app,image_stack(filepath,width,height,offset,datatype))
 
     #if len(sys.argv)==2:
     #    v=viewer(app,filepath,width,height)
@@ -145,4 +167,3 @@ def main():
 
 if __name__=="__main__":
     main();
-        
