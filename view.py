@@ -2,12 +2,64 @@
 import os
 import sys
 import time
+import zlib
 
 import numpy as np
 from pyqtgraph.Qt import QtCore, QtGui
 import pyqtgraph as pg
 
 from argparse import ArgumentParser
+
+def read_hr2(filepath):
+
+    hr2_dict={}
+
+    with open(filepath,'rb') as f:
+
+        # Ensure we have an HR2 file
+        magic_number=f.read(3)
+        if magic_number!=b"HR2":
+            #print("File is not an hr2 file. Exiting")
+            sys.exit(1)
+
+        # Read the file into memory
+        while True:
+            # Get tag
+            chunk_tag_size=int.from_bytes(f.read(1),byteorder='little')            
+            chunk_tag=f.read(chunk_tag_size)
+            #print(str(chunk_tag,'utf-8'))
+
+            # Get value
+            # Handle all tags *except* image data (size=uint16)
+            if chunk_tag!=b'ImageData':
+                chunk_val_size=int.from_bytes(f.read(2),byteorder='little')
+                chunk_val=f.read(chunk_val_size)
+                hr2_dict[str(chunk_tag,'utf-8')]=str(chunk_val,'utf-8')
+            # Handle image data tag (size=uint32)
+            else:
+                chunk_val_size=int.from_bytes(f.read(4),byteorder='little')
+                header_end_byte=f.tell()
+                chunk_val=f.read(chunk_val_size)
+                hr2_dict[str(chunk_tag,'utf-8')]=chunk_val
+                break
+
+        # Decompress the image data using zlib
+        if hr2_dict['Compression']=="ZLib":
+            hr2_dict['ImageData']=zlib.decompress(hr2_dict['ImageData'])
+
+        # Parse image data byte string into numpy array
+        hr2_dict['Size']=[int(x) for x in hr2_dict['Size'].split(' ')]
+        hr2_dict['ImageData']=np.fromstring(hr2_dict['ImageData'],dtype='int16')
+        hr2_dict['ImageData']=hr2_dict['ImageData'].reshape(hr2_dict['Size'][2],hr2_dict['Size'][1],hr2_dict['Size'][0])
+
+        # Read the raw header data into our dictionary (will be used to save a copy for easy-rewrapping)
+        with open(filepath,'rb') as f:
+            hr2_dict['HeaderData']=f.read(header_end_byte)
+
+        #print(hr2_dict['HeaderData'])
+            
+        return hr2_dict
+    pass
 
 class image_stack:
     stack=None
@@ -26,22 +78,32 @@ class image_stack:
         self.height=height;
         self.datatype=datatype
 
-        with open(filepath,'r') as f:
+        # Parse the file extension to see what we have
+        # Load the image stack based on what we find
+        # Offers support for IMG and HR2 *only*
+        fname,fext = os.path.splitext(filepath)
 
-            f.seek(offset,os.SEEK_SET);
-            if self.datatype=='float':
-                self.stack=np.fromfile(f,'float32')
-            else:
-                self.stack=np.fromfile(f,'float64')
-            
+        if fext.lower()=='.img':            
+            with open(filepath,'r') as f:
+                f.seek(offset,os.SEEK_SET);
+                if self.datatype=='float':
+                    self.stack=np.fromfile(f,'float32')
+                else:
+                    self.stack=np.fromfile(f,'float64')
+                
             print(self.stack.size)
+            self.stack=self.stack.reshape(self.stack.size/(self.width*self.height),self.width,self.height);
+            self.stack=1000*(self.stack-0.01923)/(0.01923)
+            stack_size=self.stack.shape
+            self.n_images=stack_size[0];
+        elif fext.lower()=='.hr2':
+            hr2_dict=read_hr2(filepath)
+            self.stack=hr2_dict['ImageData']
+            stack_size=self.stack.shape
+            self.n_images=stack_size[0];
+        else:
+            sys.exit('Unrecognized filetype: {}'.format(fext))
         
-        #self.stack=np.fromfile(filepath,'float32');
-        self.stack=self.stack.reshape(self.stack.size/(self.width*self.height),self.width,self.height);
-        self.stack=1000*(self.stack-0.01923)/(0.01923)
-        stack_size=self.stack.shape
-        self.n_images=stack_size[0];
-
     def __getitem__(self,key):
         if (key in range(0,self.n_images)):
             return self.stack[key,:,:]
@@ -93,8 +155,8 @@ class viewer(pg.GraphicsLayoutWidget):
         self.show()
 
     def update_image(self):
-	self.img_obj.setImage(self.stack[self.stack.curr_image],levels=(self.level-self.window/2,self.level+self.window/2))
-	self.app.processEvents()
+        self.img_obj.setImage(self.stack[self.stack.curr_image],levels=(self.level-self.window/2,self.level+self.window/2))
+        self.app.processEvents()
 
     def play(self):
         while self.is_playing and self.stack.curr_image<=self.stack.n_images-1:
@@ -139,6 +201,8 @@ class viewer(pg.GraphicsLayoutWidget):
             self.window=self.img_obj.levels[1]-self.img_obj.levels[0]
             self.level=(self.img_obj.levels[1]+self.img_obj.levels[0])/2
             self.removeItem(self.hist_obj);
+
+
 
 def main():
     app=QtGui.QApplication(sys.argv)
